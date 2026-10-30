@@ -56,7 +56,7 @@ function Login({ onLogin }) {
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 grid size-20 place-items-center rounded-3xl  text-cesba shadow-lg">
             <img
-              src="./img/icon.jpg"
+              src="/icon.jpg"
               alt="CESBA Logo"
               className="h-auto w-auto rounded-xl object-contain"
             />
