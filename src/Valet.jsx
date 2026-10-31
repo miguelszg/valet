@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { 
   CarFront, QrCode, CheckCircle2, XCircle, Clock, MapPin, 
   Camera, AlertTriangle, RefreshCw, CreditCard, History, X, ShieldAlert
@@ -7,6 +7,7 @@ import {
   getUsers, saveUsers, getSavedVehicles, saveVehicle, 
   getActiveTickets, saveActiveTicket, getHistory, addHistoryEntry 
 } from './store'
+import QrScanner from './QrScanner'
 
 export default function Valet({ session, onUpdateSession }) {
   const [users, setUsers] = useState(getUsers())
@@ -346,51 +347,40 @@ function ValetEmployeeView({ session, users, vehicles, tickets, historyList, onU
   const [step, setStep] = useState('SCAN') // SCAN, VERIFY, CONFIRM, MANAGEMENT, DELIVER_SCAN
   const [selectedUser, setSelectedUser] = useState(null)
   const [assignedSpot, setAssignedSpot] = useState('A-14')
-  const [cameraActive, setCameraActive] = useState(false)
-  const videoRef = useRef(null)
+  const [scanError, setScanError] = useState('')
+  const [deliverTarget, setDeliverTarget] = useState(null) // usuario dueño del auto que se va a entregar
+  const [manualCode, setManualCode] = useState('')
 
-  // Iniciar/Detener cámara real
-  useEffect(() => {
-    let stream = null
-    if (cameraActive && (step === 'SCAN' || step === 'DELIVER_SCAN')) {
-      navigator.mediaDevices?.getUserMedia({ video: { facingMode: 'environment' } })
-        .then(s => {
-          stream = s
-          if (videoRef.current) videoRef.current.srcObject = s
-        })
-        .catch(() => console.log('Cámara real no disponible en este dispositivo.'))
-    }
-    return () => {
-      if (stream) stream.getTracks().forEach(t => t.stop())
-    }
-  }, [cameraActive, step])
+  useEffect(() => { setScanError('') }, [step])
 
-  // Escaneo simulado o real
-  const handleSelectUser = (userKey) => {
-    const target = users.find(u => u.user === userKey)
-    if (target) {
-      setSelectedUser(target)
-      if (step === 'DELIVER_SCAN') {
-        // Confirmar entrega re-escaneando QR
-        const t = tickets[userKey]
-        if (t) {
-          addHistoryEntry({
-            id: 'HIS-' + Math.floor(1000 + Math.random() * 9000),
-            userKey: userKey,
-            studentName: target.name,
-            vehicle: `${vehicles[userKey]?.brand || 'Auto'} (${vehicles[userKey]?.plate || 'S/P'})`,
-            spot: t.spot,
-            checkInTime: t.checkInTime,
-            checkOutTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            status: 'Entregado'
-          })
-        }
-        onUpdateTicket(userKey, null)
-        setStep('MANAGEMENT')
-      } else {
-        setStep('VERIFY')
-      }
+  // Recibe el texto leído del QR (la matrícula del alumno) o capturado a mano
+  const handleScanText = (raw) => {
+    const code = String(raw).trim().toUpperCase()
+    const target = users.find(u => u.role === 'student' && u.matricula.toUpperCase() === code)
+    if (!target) { setScanError(`QR no reconocido: "${String(raw).slice(0, 30)}"`); return }
+
+    if (step === 'DELIVER_SCAN') {
+      if (target.user !== deliverTarget) { setScanError(`Este QR es de ${target.name}, no del dueño de este vehículo.`); return }
+      const t = tickets[target.user]
+      if (!t) { setScanError('Este estudiante no tiene vehículo en resguardo.'); return }
+      addHistoryEntry({
+        id: 'HIS-' + Math.floor(1000 + Math.random() * 9000),
+        userKey: target.user,
+        studentName: target.name,
+        vehicle: `${vehicles[target.user]?.brand || 'Auto'} (${vehicles[target.user]?.plate || 'S/P'})`,
+        spot: t.spot,
+        checkInTime: t.checkInTime,
+        checkOutTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'Entregado'
+      })
+      onUpdateTicket(target.user, null)
+      setDeliverTarget(null); setManualCode(''); setStep('MANAGEMENT')
+      return
     }
+
+    // Recepción
+    if (tickets[target.user]) { setScanError(`${target.name} ya tiene un vehículo en resguardo.`); return }
+    setSelectedUser(target); setManualCode(''); setStep('VERIFY')
   }
 
   // Recepción e inicio de ticket
@@ -445,48 +435,26 @@ function ValetEmployeeView({ session, users, vehicles, tickets, historyList, onU
         <div className="rounded-2xl bg-panel p-6 shadow-xl border border-white/5 space-y-4">
           <h2 className="text-lg font-extrabold text-white">Escanear Membresía de Estudiante</h2>
 
-          {/* Visor de Cámara */}
-          <div className="relative rounded-2xl bg-black border-2 border-dashed border-cesba/50 h-56 flex flex-col items-center justify-center overflow-hidden">
-            {cameraActive ? (
-              <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
-            ) : (
-              <QrCode className="size-20 text-cesba animate-pulse" />
-            )}
-            
-            {/* Animación Láser */}
-            <div className="absolute inset-x-0 h-0.5 bg-red-500 shadow-[0_0_15px_red] animate-bounce" />
+          <QrScanner onScan={handleScanText} />
 
-            <button
-              onClick={() => setCameraActive(!cameraActive)}
-              className="absolute bottom-3 bg-navy/80 border border-white/20 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 z-10"
-            >
-              <Camera className="size-4 text-cesba" />
-              {cameraActive ? 'Apagar Cámara' : 'Abrir Cámara Cámara Real'}
-            </button>
-          </div>
+          {scanError && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs font-bold text-red-200">
+              <AlertTriangle className="size-4 shrink-0" /> {scanError}
+            </div>
+          )}
 
-          <div>
-            <p className="text-xs font-bold text-white/70 mb-2">Simular lectura de QR para estudiantes disponibles:</p>
-            {unparkedStudents.length === 0 ? (
-              <p className="text-xs text-white/50 py-2">Todos los estudiantes registrados tienen su auto en resguardo.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {unparkedStudents.map(u => (
-                  <button
-                    key={u.user}
-                    onClick={() => handleSelectUser(u.user)}
-                    className={`rounded-lg px-3 py-2 text-xs font-bold border ${
-                      u.status === 'active' 
-                        ? 'bg-cesba/20 text-cesba border-cesba/40 hover:bg-cesba hover:text-white' 
-                        : 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500 hover:text-white'
-                    }`}
-                  >
-                    QR {u.name.split(' ')[0]} ({u.status === 'active' ? 'Válida' : 'Vencida'})
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (manualCode.trim()) handleScanText(manualCode) }}
+            className="flex gap-2"
+          >
+            <input
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              placeholder="¿Sin cámara? Escribe la matrícula"
+              className="flex-1 rounded-xl bg-navy px-4 py-2.5 font-mono text-xs text-white outline-none focus:ring-2 focus:ring-cesba"
+            />
+            <button type="submit" className="rounded-xl bg-cesba px-4 text-xs font-extrabold text-white">Buscar</button>
+          </form>
         </div>
       )}
 
@@ -526,7 +494,7 @@ function ValetEmployeeView({ session, users, vehicles, tickets, historyList, onU
                 <button onClick={() => setStep('SCAN')} className="flex-1 rounded-xl bg-navy py-3 text-xs font-bold text-white">
                   Rechazar
                 </button>
-                <button onClick={() => setStep('CONFIRM')} className="flex-1 rounded-xl bg-cesba py-3 text-xs font-bold text-white shadow">
+                <button onClick={() => setStep('CONFIRM')} disabled={!vehicles[selectedUser.user]} className="flex-1 rounded-xl bg-cesba py-3 text-xs font-bold text-white shadow disabled:opacity-40">
                   Confirmar Recepción →
                 </button>
               </div>
@@ -582,27 +550,32 @@ function ValetEmployeeView({ session, users, vehicles, tickets, historyList, onU
           <h2 className="text-lg font-extrabold text-amber-400">Re-escanear QR para Entregar Vehículo</h2>
           <p className="text-xs text-white/70">Escanea la membresía del alumno para validar la entrega en mano y cerrar el ticket.</p>
 
-          <div className="rounded-2xl bg-navy p-6 border-2 border-dashed border-amber-500/40 text-center space-y-3">
-            <QrCode className="mx-auto size-16 text-amber-400 animate-pulse" />
-            <p className="text-xs text-white/80 font-semibold">Esperando lectura de QR de confirmación...</p>
+          <p className="rounded-xl bg-navy p-3 text-xs font-bold text-white">
+            Dueño del vehículo: <span className="text-amber-400">{users.find(u => u.user === deliverTarget)?.name}</span>
+          </p>
 
-            <div className="pt-2">
-              <p className="text-[11px] font-bold text-white/60 mb-2">Simular escaneo de devolución:</p>
-              <div className="flex justify-center gap-2">
-                {activeParkedList.map(item => (
-                  <button
-                    key={item.user.user}
-                    onClick={() => handleSelectUser(item.user.user)}
-                    className="rounded-lg bg-amber-500/20 border border-amber-500/50 px-3 py-1.5 text-xs font-bold text-amber-300 hover:bg-amber-500 hover:text-slate-950"
-                  >
-                    Confirmar QR de {item.user.name.split(' ')[0]}
-                  </button>
-                ))}
-              </div>
+          <QrScanner onScan={handleScanText} />
+
+          {scanError && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs font-bold text-red-200">
+              <AlertTriangle className="size-4 shrink-0" /> {scanError}
             </div>
-          </div>
+          )}
 
-          <button onClick={() => setStep('MANAGEMENT')} className="w-full rounded-xl bg-navy py-3 text-xs font-bold text-white">
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (manualCode.trim()) handleScanText(manualCode) }}
+            className="flex gap-2"
+          >
+            <input
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              placeholder="¿Sin cámara? Escribe la matrícula"
+              className="flex-1 rounded-xl bg-navy px-4 py-2.5 font-mono text-xs text-white outline-none focus:ring-2 focus:ring-cesba"
+            />
+            <button type="submit" className="rounded-xl bg-cesba px-4 text-xs font-extrabold text-white">Buscar</button>
+          </form>
+
+          <button onClick={() => { setDeliverTarget(null); setStep('MANAGEMENT') }} className="w-full rounded-xl bg-navy py-3 text-xs font-bold text-white">
             Cancelar
           </button>
         </div>
@@ -649,7 +622,7 @@ function ValetEmployeeView({ session, users, vehicles, tickets, historyList, onU
                         Cancelar Servicio
                       </button>
                       <button
-                        onClick={() => setStep('DELIVER_SCAN')}
+                        onClick={() => { setDeliverTarget(user.user); setStep('DELIVER_SCAN') }}
                         className="flex-2 rounded-lg bg-blue-600 hover:bg-blue-500 py-2 text-xs font-extrabold text-white shadow flex items-center justify-center gap-1.5"
                       >
                         <QrCode className="size-4" /> Escanear QR y Entregar
