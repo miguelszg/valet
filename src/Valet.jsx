@@ -149,13 +149,11 @@ function StudentValetView({ session, vehicle, activeTicket, historyList, onSaveV
             {isInactive ? 'Membresía Vencida' : 'Membresía Activa'}
           </span>
         </div>
-
-        <div className="mx-auto flex max-w-xs flex-col items-center justify-center rounded-xl bg-white p-5 text-navy shadow-inner relative">
-          <QrCode className="size-44" />
-          <p className="mt-3 font-mono text-xs font-extrabold tracking-widest text-slate-700">
-            MATRÍCULA: {session.matricula}
-          </p>
-        </div>
+        <img
+          src={`/img/${session.user}-qr.png`}
+          alt={`Código QR de ${session.name}`}
+          className="mx-auto block size-44 object-contain"
+        />
       </div>
 
       {/* Estado del Servicio */}
