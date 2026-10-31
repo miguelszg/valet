@@ -150,7 +150,7 @@ function StudentValetView({ session, vehicle, activeTicket, historyList, onSaveV
           </span>
         </div>
         <img
-          src={`/img/${session.user}-qr.png`}
+          src={`/${session.user}-qr.png`}
           alt={`Código QR de ${session.name}`}
           className="mx-auto block size-44 object-contain"
         />
